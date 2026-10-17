@@ -1,0 +1,166 @@
+import {spawn} from 'node:child_process';
+import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+import {createYenaServer} from '../server/index.mjs';
+import {ensureLocalMySQL} from '../scripts/mysql-local.mjs';
+import {createMySQLRepository} from '../server/database.mjs';
+const root=process.cwd(),runtime=path.join(root,'.sites-runtime');
+await fs.mkdir(path.join(runtime,'screenshots'),{recursive:true});
+const mime={'.html':'text/html; charset=utf-8','.css':'text/css','.mjs':'text/javascript; charset=utf-8'};
+const mockCalls=[],integration=process.env.YENA_QA_DEEPSEEK==='1',mysqlQA=process.env.YENA_QA_MYSQL==='1';
+if(mysqlQA)process.loadEnvFile('.env');
+const dbInstance=mysqlQA?await ensureLocalMySQL():null,repository=mysqlQA?createMySQLRepository():null;
+const loginUser=mysqlQA?process.env.YENA_ADMIN_USER:'browser-admin',loginPassword=mysqlQA?process.env.YENA_ADMIN_PASSWORD:'BrowserTest2026!';
+const server=createYenaServer({apiKey:integration?'browser-test-fake-credential':'',repository,adminUsername:loginUser,adminPassword:loginPassword,rateLimit:30,fetchImpl:async(url,options)=>{const data=JSON.parse(options.body);mockCalls.push(data);await new Promise(resolve=>setTimeout(resolve,200));if(data.messages.at(-1).content.includes('Simular falha'))return new Response('browser-test-fake-credential',{status:401});return new Response(JSON.stringify({choices:[{message:{content:'Resposta controlada para teste: YENA é um projeto acadêmico fictício.'},finish_reason:'stop'}]}));}});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const origin=process.env.YENA_QA_SINGLE==='1'?pathToFileURL(path.join(root,'YENA-demonstracao.html')).href:`http://127.0.0.1:${server.address().port}`;
+const chrome=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-pipe',`--user-data-dir=${path.join(runtime,'chrome-pipe-qa')}`],{windowsHide:true,stdio:['ignore','ignore','pipe','pipe','pipe']});
+let stderr='';chrome.stderr.on('data',c=>stderr+=c);
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+let seq=0,sessionId;const pending=new Map(),errors=[];let count=0;
+try{
+ let buffer='';
+ chrome.stdio[4].on('data',data=>{buffer+=data;let end;while((end=buffer.indexOf('\0'))!==-1){const raw=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!raw)continue;const msg=JSON.parse(raw);if(msg.id){const p=pending.get(msg.id);if(!p)continue;pending.delete(msg.id);clearTimeout(p.timer);msg.error?p.reject(Error(msg.error.message)):p.resolve(msg.result);}else if(msg.method==='Runtime.exceptionThrown')errors.push(msg.params.exceptionDetails.text+' '+(msg.params.exceptionDetails.exception?.description||''));}});
+ const call=(method,params={},global=false)=>new Promise((resolve,reject)=>{const id=++seq;const timer=setTimeout(()=>{pending.delete(id);reject(Error('Délai CDP: '+method+' '+stderr.slice(-800)));},15000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(!global&&sessionId?{sessionId}:{})})+'\0');});
+ const target=await call('Target.createTarget',{url:'about:blank'},true);
+ sessionId=(await call('Target.attachToTarget',{targetId:target.targetId,flatten:true},true)).sessionId;
+ const evaluate=async(expression)=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+ const check=async(name,expression)=>{assert.ok(await evaluate(expression),name);console.log('OK '+name);count++;};
+ const run=async expression=>evaluate(expression);
+ const go=async(route)=>{await run(`location.hash=${JSON.stringify(route)}`);await delay(80);};
+ const waitFor=async expression=>{for(let i=0;i<100;i++){if(await run(expression))return;await delay(50);}throw Error('Condição da interface não atendida.');};
+ const saved=async()=>{if(mysqlQA)await waitFor(`!document.querySelector('#dialog').open`);};
+ const screenshot=async(name)=>{const r=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await fs.writeFile(path.join(runtime,'screenshots',name+'.png'),Buffer.from(r.data,'base64'));};
+ await call('Page.enable');await call('Runtime.enable');
+ await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
+ await call('Page.navigate',{url:origin});
+ if(process.env.YENA_QA_SINGLE==='1'){
+  await waitFor(`document.querySelector('#session-status').textContent.includes('O login funciona')`);
+  await check('HTML isolado orienta usar o servidor para autenticar',`!document.querySelector('#open-local-app').hidden`);
+  await check('HTML isolado não simula login ou libera painel',`document.querySelector('#login-form').hidden&&document.querySelector('.shell').hidden&&!document.querySelector('.hero')`);
+  await go('monitoramento');await check('hash não libera acesso no HTML isolado',`document.querySelector('#sidebar').hidden&&!document.querySelector('.camera-card')`);
+  await screenshot('yena-login-arquivo');
+ }else{
+ await waitFor(`!document.querySelector('#login-form').hidden`);
+ await check('login é a primeira tela e esconde toda a plataforma',`!document.querySelector('#login-screen').hidden&&document.querySelector('#sidebar').hidden&&document.querySelector('.shell').hidden&&!document.querySelector('.hero')`);
+ await screenshot('yena-login-desktop');
+ await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await check('tela de login se adapta ao celular',`document.documentElement.scrollWidth<=390`);await screenshot('yena-login-mobile');
+ await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
+ await go('monitoramento');await check('URL interna não contorna o login',`document.querySelector('.shell').hidden&&!document.querySelector('.camera-card')`);await go('inicio');
+ await run(`document.querySelector('#login-user').value=${JSON.stringify(loginUser)};document.querySelector('#login-password').value='senha-incorreta';document.querySelector('#login-form').requestSubmit()`);
+ await waitFor(`!document.querySelector('#login-error').hidden&&!document.querySelector('#login-form [type="submit"]').disabled`);
+ await check('senha incorreta mantém a tela de login',`document.querySelector('#login-error').textContent.includes('Usuário ou senha inválidos')&&document.querySelector('.shell').hidden`);
+ await run(`document.querySelector('#login-user').value='usuario-incorreto';document.querySelector('#login-password').value=${JSON.stringify(loginPassword)};document.querySelector('#login-form').requestSubmit()`);
+ await waitFor(`!document.querySelector('#login-error').hidden&&!document.querySelector('#login-form [type="submit"]').disabled`);
+ await check('usuário incorreto também é recusado',`document.querySelector('.shell').hidden&&!document.querySelector('.hero')`);
+ await run(`document.querySelector('.password-toggle').click()`);await check('controle de mostrar senha funciona',`document.querySelector('#login-password').type==='text'`);await run(`document.querySelector('.password-toggle').click()`);
+ const signIn=async()=>{await run(`document.querySelector('#login-user').value=${JSON.stringify(loginUser)};document.querySelector('#login-password').value=${JSON.stringify(loginPassword)};document.querySelector('#login-form').requestSubmit()`);await waitFor(`document.querySelector('#login-screen').hidden`);};
+ await signIn();await waitFor(`!!document.querySelector('.hero')`);
+ await check('credenciais corretas liberam a plataforma',`!document.querySelector('.shell').hidden&&document.querySelector('#login-password').value===''`);
+ await check('página inicial e seis rotas',`document.querySelector('#main h1').textContent==='Bem-vindo à YENA'&&document.querySelectorAll('.nav-link').length===6`);
+ await check('declaração de simulação na página inicial',`document.body.textContent.includes('Não há câmeras físicas conectadas')`);
+ await screenshot('yena-desktop');
+ await go('monitoramento');await check('quatro ambientes simulados',`document.querySelectorAll('.camera-card').length===4`);
+ await run(`document.querySelector('#room-filter').value='corredor';document.querySelector('#room-filter').dispatchEvent(new Event('change',{bubbles:true}))`);
+ await check('filtro de ambiente atua nas câmeras e alertas',`document.querySelectorAll('.camera-card').length===1&&document.querySelectorAll('#alerts-table tbody tr').length===1`);
+ await run(`document.querySelector('#priority-filter').value='Baixa';document.querySelector('#priority-filter').dispatchEvent(new Event('change',{bubbles:true}))`);
+ await check('combinação de filtros vazia',`document.querySelector('#alerts-table').textContent.includes('Nenhum alerta')`);
+ await run(`document.querySelector('[data-action="clear-monitor"]').click();document.querySelector('[data-action="alert-detail"]').click()`);
+ await check('detalhes mostram evento fictício',`document.querySelector('#dialog').open&&document.querySelector('#dialog').textContent.includes('Nenhuma imagem foi capturada')`);
+ await run(`document.querySelector('[data-action="alert-review"]').click()`);
+ await check('revisão de alerta',`document.querySelector('.reviewed').textContent==='Revisado'&&!document.querySelector('#dialog').open`);
+ await go('clientes');
+ if(mysqlQA){
+  await waitFor(`document.querySelectorAll('#clients-table tbody tr').length===3`);
+  await check('login libera os dados persistentes',`!document.querySelector('[data-action="client-new"]').disabled&&document.querySelector('#account-button').textContent==='Sair'`);
+  await screenshot('yena-clientes-mysql');
+ }
+ await check('três clientes fictícios iniciais',`document.querySelectorAll('#clients-table tbody tr').length===3`);
+ await run(`document.querySelector('[data-action="client-new"]').click()`);
+ await check('formulário valida os campos obrigatórios',`!document.querySelector('#client-form').checkValidity()`);
+ await run(`for(const [name,value] of Object.entries({name:'Teste <img src=x onerror=alert(1)>',institution:'Instituição Modelo',contact:'teste@exemplo.invalid',need:'Testar a apresentação acadêmica.'})){document.querySelector('#client-form [name='+name+']').value=value;}document.querySelector('#client-form').requestSubmit()`);
+ await saved();
+ if(mysqlQA){await call('Page.reload');await waitFor(`document.querySelectorAll('#clients-table tbody tr').length===4`);await check('cliente continua salvo após recarregar',`document.querySelector('#clients-table').textContent.includes('<img')`);}
+ await check('cadastro e proteção de texto livre',`document.querySelectorAll('#clients-table tbody tr').length===4&&!document.querySelector('#clients-table img')&&document.querySelector('#clients-table').textContent.includes('<img')`);
+ await run(`document.querySelector('#client-search').value='instituição modelo';document.querySelector('#client-search').dispatchEvent(new Event('input',{bubbles:true}))`);
+ await check('busca de cliente',`document.querySelectorAll('#clients-table tbody tr').length===1`);
+ await run(`document.querySelector('[data-action="client-view"]').click()`);
+ await check('visualização da ficha',`document.querySelector('#dialog').textContent.includes('Testar a apresentação acadêmica.')`);
+ await run(`document.querySelector('#dialog [data-action="client-edit"]').click();document.querySelector('#client-status').value='Em análise';document.querySelector('#client-name').value='Pessoa Modelo';document.querySelector('#client-form').requestSubmit()`);
+ await saved();
+ await check('edição de nome e etapa',`document.querySelector('#clients-table').textContent.includes('Pessoa Modelo')&&document.querySelector('#clients-table').textContent.includes('Em análise')`);
+ await run(`document.querySelector('#client-stage').value='Novo contato';document.querySelector('#client-stage').dispatchEvent(new Event('change',{bubbles:true}))`);
+ await check('filtro de etapa',`!document.querySelector('#clients-table tbody')`);
+ await run(`document.querySelector('#client-stage').value='todas';document.querySelector('#client-stage').dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-action="client-delete"]').click()`);
+ await check('exclusão exige confirmação do registro',`document.querySelector('#dialog').open&&document.querySelector('#dialog').textContent.includes('Pessoa Modelo')`);
+ await run(`document.querySelector('[data-action="client-confirm-delete"]').click()`);
+ await saved();
+ await check('cliente excluído',`!document.querySelector('#clients-table').textContent.includes('Pessoa Modelo')`);
+ await go('orcamentos');
+ await check('orçamento inicial correto',`document.querySelector('[data-total="initial"]').textContent.includes('18.600,00')&&document.querySelector('[data-total="monthly"]').textContent.includes('3.000,00')`);
+ await run(`document.querySelector('#quote-cameras').value='-1';document.querySelector('#quote-cameras').dispatchEvent(new Event('input',{bubbles:true}))`);
+ await check('quantidade negativa mostra erro e impede resumo',`!!document.querySelector('#quote-summary .error')&&!document.querySelector('[data-action="quote-generate"]')`);
+ await go('inicio');await go('orcamentos');await check('navegação após campo inválido preserva valor válido',`!!document.querySelector('[data-action="quote-generate"]')`);
+ await run(`document.querySelector('[name="plan"][value="basico"]').click();for(const name of ['cameras','badges']){const el=document.querySelector('#quote-form [name='+name+']');el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('[name="installation"]').click();document.querySelector('[name="maintenance"]').click()`);
+ await check('plano básico sem opcionais',`document.querySelector('[data-total="initial"]').textContent.includes('0,00')&&document.querySelector('[data-total="monthly"]').textContent.includes('1.500,00')`);
+ await run(`document.querySelector('[data-action="quote-generate"]').click()`);
+ await check('resumo acadêmico e botão de download',`document.querySelector('#dialog').textContent.includes('ESTIMATIVA ACADÊMICA')&&!!document.querySelector('[data-action="quote-download"]')`);
+ if(mysqlQA){
+  await run(`document.querySelector('[data-action="quote-save"]').click()`);await waitFor(`document.querySelector('[data-action="quote-save"]').textContent==='Salvo no MySQL'`);
+  await check('orçamento aparece no histórico persistente',`document.querySelectorAll('#quote-history tbody tr').length===1`);
+ }
+ await run(`document.querySelector('[data-action="quote-download"]').click();document.querySelector('#dialog [data-action="dialog-close"]').click()`);
+ if(mysqlQA){
+  await call('Page.reload');await waitFor(`document.querySelectorAll('#quote-history tbody tr').length===1`);await check('orçamento continua salvo após recarregar',`document.querySelector('#quote-history').textContent.includes('1.500,00')`);
+  await run(`document.querySelector('[data-action="quote-delete"]').click();document.querySelector('[data-action="quote-confirm-delete"]').click()`);await saved();await check('exclusão de orçamento refletida na interface',`document.querySelectorAll('#quote-history tbody tr').length===0`);
+ }
+ await go('ai');
+ if(integration){
+   const waitReply=async()=>{for(let i=0;i<100;i++){if(await run(`!document.querySelector('#chat-form').matches('[aria-busy="true"]')`))return;await delay(50);}throw Error('A resposta de teste não terminou.');};
+   await check('DeepSeek configurado é selecionado sem afirmar consulta concluída',`document.querySelector('#ai-mode').value==='deepseek'&&document.querySelector('#ai-state-label').textContent.includes('configurado')`);
+   await check('aviso explica envio de mensagens ao provedor',`document.querySelector('#ai-mode-notice').textContent.includes('seguem para o provedor')`);
+   await run(`document.querySelector('#chat-input').value='Apresente a empresa YENA.';document.querySelector('#chat-form').requestSubmit()`);
+   await check('consulta em andamento bloqueia envio duplicado',`document.querySelector('#chat-input').disabled&&document.querySelector('#chat-form').getAttribute('aria-busy')==='true'&&!document.querySelector('#chat-pending').hidden`);
+   await waitReply();
+   await check('resposta real identifica o provedor retornado pelo servidor',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('Resposta controlada')&&document.querySelector('#chat-messages').lastElementChild.querySelector('.message-source').textContent.includes('DeepSeek')`);
+   assert.equal(mockCalls.length,1);assert.equal(mockCalls[0].messages.length,2);assert.ok(!JSON.stringify(mockCalls[0]).includes('Marina Exemplo'));console.log('OK cadastros não enviados automaticamente');count++;
+   await run(`document.querySelectorAll('[data-prompt]')[2].click()`);
+   await check('cálculo usa origem local mesmo no modo DeepSeek',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('18.600,00')&&document.querySelector('#chat-messages').lastElementChild.querySelector('.message-source').textContent.includes('Regras locais')`);
+   assert.equal(mockCalls.length,1);console.log('OK cálculo não dispara consulta ao provedor');count++;
+   await run(`document.querySelector('#chat-input').value='Simular falha';document.querySelector('#chat-form').requestSubmit()`);await waitReply();
+   await check('falha de credencial é exibida sem resposta demonstrativa automática',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('recusou a credencial')&&document.querySelector('#chat-messages').lastElementChild.querySelector('.message-source').textContent.includes('Falha na consulta')`);
+   await check('credencial não aparece na página',`!document.documentElement.innerHTML.includes('browser-test-fake-credential')`);
+   await run(`document.querySelector('#ai-mode').value='demo';document.querySelector('#ai-mode').dispatchEvent(new Event('change',{bubbles:true}))`);
+   await check('troca para demonstração reinicia histórico e informa modo local',`document.querySelectorAll('.message').length===1&&document.querySelector('#ai-mode-notice').textContent.includes('Nenhuma IA externa')`);
+ }
+ await check('assistente identifica regras locais',`document.querySelector('#chat-messages').textContent.includes('nenhum modelo externo')`);
+ await run(`document.querySelectorAll('[data-prompt]')[2].click()`);
+ await check('assistente calcula estimativa',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('18.600,00')&&document.querySelector('#chat-messages').lastElementChild.textContent.includes('3.000,00')`);
+ await run(`document.querySelector('#chat-input').value='Qual o nome do CEO?';document.querySelector('#chat-form').requestSubmit()`);
+ await check('resposta desconhecida não inventa dados',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('Não tenho essa informação')`);
+ await run(`const select=document.querySelector('#ai-client');select.value=[...select.options].find(o=>o.textContent.includes('Marina')).value;document.querySelector('[data-action="client-brief"]').click()`);
+ await check('ficha usa o cadastro da sessão',`document.querySelector('#chat-messages').lastElementChild.textContent.includes('Marina Exemplo')&&document.querySelector('#chat-messages').lastElementChild.textContent.includes('Orçamento disponível: não informado')`);
+ await go('configuracoes');await run(`document.querySelector('#reduced-motion').click()`);
+ await check('preferência de acessibilidade',`document.body.classList.contains('no-motion')`);
+ await run(`document.querySelector('[data-action="reset-demo"]').click();document.querySelector('[data-action="confirm-reset"]').click()`);
+ await check('restauração dos exemplos e preferências',`!document.body.classList.contains('no-motion')`);
+ await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await go('inicio');await check('página sem overflow no celular',`document.documentElement.scrollWidth<=390`);await screenshot('yena-mobile');
+ await run(`document.querySelector('#menu-toggle').click()`);await check('menu lateral abre no celular',`document.querySelector('#sidebar').classList.contains('open')&&document.querySelector('#menu-toggle').getAttribute('aria-expanded')==='true'`);
+ await run(`document.querySelector('[data-route="clientes"]').click()`);await delay(100);await check('navegação móvel fecha menu',`document.querySelector('#main h1').textContent==='Clientes'&&!document.querySelector('#sidebar').classList.contains('open')`);
+ for(const r of ['monitoramento','ai','clientes','orcamentos','configuracoes']){await go(r);if(await run(`document.documentElement.scrollWidth>390`)){console.log('Overflow '+r,await run(`[...document.querySelectorAll('main *')].filter(e=>e.getBoundingClientRect().right>391).slice(0,15).map(e=>({tag:e.tagName,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right}))`));await screenshot('overflow-'+r);}await check('layout móvel: '+r,`document.documentElement.scrollWidth<=390`);}
+ await go('orcamentos');await screenshot('yena-mobile-orcamento');
+ await run(`document.querySelector('#account-button').click()`);await waitFor(`!document.querySelector('#login-screen').hidden`);
+ await check('sair retorna à tela de login e remove os dados do painel',`document.querySelector('.shell').hidden&&document.querySelector('#main').children.length===0`);
+ await go('monitoramento');await call('Page.reload');await waitFor(`!document.querySelector('#login-form').hidden`);
+ await check('recarregar URL protegida após logout exige credenciais',`document.querySelector('.shell').hidden&&!document.querySelector('.camera-card')`);
+ await signIn();await waitFor(`document.querySelectorAll('.camera-card').length===4`);
+ await check('mesmo login fixo permite entrar novamente',`document.querySelector('#login-screen').hidden`);
+ }
+ assert.deepEqual(errors,[],'Exceções do navegador');
+ console.log(`SUCESSO: ${count} verificações no navegador; nenhuma exceção JavaScript.`);
+}finally{try{chrome.stdio[3].write(JSON.stringify({id:++seq,method:'Browser.close'})+'\0');}catch{}await delay(300);chrome.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));if(repository)await repository.close();if(dbInstance)await dbInstance.stop();}

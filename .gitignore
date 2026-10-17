@@ -1,0 +1,10 @@
+# Pacote gerado para compartilhamento; o código está na pasta yena.
+/YENA-prototipo.zip
+
+# Configurações privadas, dependências e banco local.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules/
+**/.sites-runtime/
+**/.openai/

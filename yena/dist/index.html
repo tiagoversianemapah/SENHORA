@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Conheça a YENA Healthcare Technology. Protótipo acadêmico de tecnologia e cuidado, com monitoramento simulado e estimativas de orçamento.">
+  <title>YENA — Cuidando quando não se pode ver</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%236835bd'/%3E%3Cpath d='M17 18l15 17 15-17M32 35v14' fill='none' stroke='white' stroke-width='9' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body class="auth-only">
+  <a class="skip-link" href="#main">Pular para o conteúdo</a>
+  <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+    <div class="login-story"><a id="login-brand" class="brand login-brand" href="/" aria-label="YENA Healthcare Technology"></a><div class="login-story-copy"><span class="eyebrow">Tecnologia a serviço das pessoas</span><h2>Cuidando quando<br><em>não se pode ver.</em></h2><p>Uma plataforma para organizar informações, aproximar equipes e apoiar o cuidado humano.</p><div class="login-pillars"><span>Monitoramento</span><span>Clientes</span><span>Orçamentos</span></div></div><div class="login-story-footer">YENA Healthcare Technology <span>Projeto acadêmico · TCC</span></div></div>
+    <div id="login-content" class="login-content" role="main" tabindex="-1"><div class="login-card"><span class="eyebrow">Acesso à plataforma</span><h1 id="login-title">Bem-vindo de volta</h1><p class="login-description">Entre com seu usuário e senha para acessar a YENA.</p>
+      <p id="session-status" class="session-status" role="status">Verificando acesso ao servidor…</p>
+      <form id="login-form" hidden><div class="field"><label for="login-user">Usuário</label><input id="login-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="80" placeholder="Seu usuário"></div><div class="field"><label for="login-password">Senha</label><div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="Sua senha"><button class="password-toggle" type="button" data-action="toggle-password" aria-label="Mostrar senha" aria-pressed="false"></button></div></div><p class="error" id="login-error" role="alert" hidden></p><button type="submit" class="button login-submit">Entrar na plataforma <span aria-hidden="true">→</span></button></form>
+      <button id="session-retry" class="button secondary" data-action="session-retry" hidden>Tentar conectar novamente</button><a id="open-local-app" class="button" href="http://127.0.0.1:4173" hidden>Abrir aplicação local</a><div class="login-help"><span id="login-lock" aria-hidden="true"></span><p>Acesso autenticado para a demonstração acadêmica.<small>Os ambientes e alertas de monitoramento são simulados.</small></p></div>
+    </div><p class="login-copyright">© 2026 YENA Healthcare Technology</p></div>
+  </section>
+  <div class="mobile-scrim" id="scrim" hidden></div>
+  <aside class="sidebar" id="sidebar" aria-label="Menu principal" hidden>
+    <a href="#inicio" class="brand" aria-label="YENA — início">
+      <svg viewBox="0 0 180 100" aria-hidden="true"><defs><linearGradient id="logo-orbit"><stop stop-color="#b998d9"/><stop offset=".6" stop-color="#443966"/><stop offset="1" stop-color="#f59e0b"/></linearGradient></defs><ellipse cx="89" cy="51" rx="79" ry="19" transform="rotate(-20 89 51)" fill="none" stroke="url(#logo-orbit)" stroke-width="5"/><ellipse cx="90" cy="49" rx="52" ry="15" transform="rotate(55 90 49)" fill="none" stroke="#c2a4dc" stroke-width="2.5"/><path d="M57 32h23l6-9h20l6 9h28v43H57z" fill="#443966" stroke="#d3bcdf" stroke-width="2" transform="rotate(-5 98 48)"/><path d="M64 39h14M71 32v14" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/><path d="M120 33h13" stroke="#ece5f5" stroke-width="2"/><circle cx="97" cy="55" r="20" fill="#0f172a" stroke="#e3d3ef" stroke-width="2"/><circle cx="97" cy="55" r="15" fill="#443966" stroke="#baa1d3"/><circle cx="97" cy="49" r="5" fill="#f59e0b"/><path d="M87 66c0-12 20-12 20 0M91 58l6 7 6-7" fill="none" stroke="#f2e7ff" stroke-width="2"/><path d="M139 28c24-9 35-5 29 3-9 13-46 31-80 41" fill="none" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/></svg>
+      <span>YENA<small>HEALTHCARE TECHNOLOGY</small></span>
+    </a>
+    <div class="workspace-tag"><span class="tiny-dot"></span> Ambiente de demonstração</div>
+    <div class="nav-label">PLATAFORMA</div>
+    <nav id="nav"></nav>
+    <div class="sidebar-bottom">
+      <div class="care-note"><span class="care-symbol">✳</span><p>Tecnologia a serviço<br><strong>do cuidado humano.</strong></p><span class="note-line"></span></div>
+      <div class="academic"><span class="academic-icon">Y</span><div>Projeto acadêmico<small>Protótipo para TCC · v1.2</small></div></div>
+    </div>
+  </aside>
+  <div class="shell" hidden>
+    <header class="topbar">
+      <button class="icon-button mobile-menu" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false" aria-controls="sidebar"></button>
+      <div class="breadcrumb">Plataforma <span>/</span> <strong id="crumb">Início</strong></div>
+      <div class="topbar-right"><span class="demo-badge"><span></span> Protótipo acadêmico</span><button id="account-button" class="button secondary" data-action="login" hidden>Entrar</button><span class="top-divider"></span><div class="avatar" aria-label="YENA, projeto acadêmico">Y</div></div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <footer class="footer"><span>© 2026 YENA Healthcare Technology</span><span>Empresa fictícia · Projeto de conclusão de curso</span><span>Cuidando quando não se pode ver.</span></footer>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

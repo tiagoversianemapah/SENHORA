@@ -1,0 +1,21 @@
+{
+  "name": "yena-healthcare-prototype",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.9.0"
+  },
+  "scripts": {
+    "start": "node scripts/start-local.mjs",
+    "mysql:install": "node scripts/install-mysql-local.mjs",
+    "mysql:setup": "node scripts/setup-local.mjs",
+    "mysql:seed": "node scripts/seed-demo.mjs",
+    "test:mysql": "node tests/mysql-live.mjs",
+    "test": "node --test tests/core.test.mjs tests/server.test.mjs tests/configure-deepseek.test.mjs tests/auth.test.mjs",
+    "export": "node scripts/export-local.mjs"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.6"
+  }
+}
